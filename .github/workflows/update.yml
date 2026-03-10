@@ -1,0 +1,76 @@
+name: Auto Update
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+
+      - name: Check for updates
+        id: check
+        run: |
+          CURL_OPTS=(-sL)
+          [ -n "${GITHUB_TOKEN:-}" ] && CURL_OPTS+=(-H "Authorization: token $GITHUB_TOKEN")
+          LATEST_DATA=$(curl "${CURL_OPTS[@]}" "https://api.github.com/repos/aaronsb/obsbot-camera-control/commits/main")
+
+          LATEST_REV=$(echo "$LATEST_DATA" | jq -r '.sha')
+          LATEST_DATE=$(echo "$LATEST_DATA" | jq -r '.commit.committer.date' | cut -d'T' -f1)
+          CURRENT_REV=$(grep 'rev = ' package.nix | head -1 | sed 's/.*"\(.*\)".*/\1/')
+
+          echo "current_rev=$CURRENT_REV" >> $GITHUB_OUTPUT
+          echo "latest_rev=$LATEST_REV" >> $GITHUB_OUTPUT
+          echo "latest_date=$LATEST_DATE" >> $GITHUB_OUTPUT
+
+          if [ "$LATEST_REV" != "$CURRENT_REV" ] && [ -n "$LATEST_REV" ] && [ "$LATEST_REV" != "null" ]; then
+            echo "needs_update=true" >> $GITHUB_OUTPUT
+          else
+            echo "needs_update=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update package
+        if: steps.check.outputs.needs_update == 'true'
+        run: |
+          REV="${{ steps.check.outputs.latest_rev }}"
+          DATE="${{ steps.check.outputs.latest_date }}"
+          CURRENT_REV="${{ steps.check.outputs.current_rev }}"
+
+          # Prefetch new hash
+          SRI_HASH=$(nix-prefetch-url --unpack "https://github.com/aaronsb/obsbot-camera-control/archive/${REV}.tar.gz" 2>&1 | tail -1)
+          SRI_HASH=$(nix hash convert --to sri --hash-algo sha256 "$SRI_HASH")
+
+          sed -i "s|rev = \"$CURRENT_REV\"|rev = \"$REV\"|" package.nix
+          sed -i "s|hash = \"sha256-.*\"|hash = \"$SRI_HASH\"|" package.nix
+          sed -i "s|version = \"0-unstable-[0-9-]*\"|version = \"0-unstable-$DATE\"|" package.nix
+
+      - name: Test build
+        if: steps.check.outputs.needs_update == 'true'
+        run: |
+          nix build .#obsbot-camera-control --accept-flake-config
+
+      - name: Commit and push
+        if: steps.check.outputs.needs_update == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.nix
+          git commit -m "Update obsbot-camera-control to ${{ steps.check.outputs.latest_date }} (${{ steps.check.outputs.latest_rev }})"
+          git push
+
+      - name: Create Release
+        if: steps.check.outputs.needs_update == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.check.outputs.latest_date }}" \
+            --title "obsbot-camera-control ${{ steps.check.outputs.latest_date }}" \
+            --notes "Updated obsbot-camera-control to commit ${{ steps.check.outputs.latest_rev }}"
