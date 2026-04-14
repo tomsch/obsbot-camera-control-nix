@@ -13,13 +13,13 @@
 
 stdenv.mkDerivation {
   pname = "obsbot-camera-control";
-  version = "0-unstable-2026-03-28";
+  version = "0-unstable-2026-04-13";
 
   src = fetchFromGitHub {
     owner = "aaronsb";
     repo = "obsbot-camera-control";
-    rev = "9db64411b23f8adfddf7c570d2b89ed4dd800620";
-    hash = "sha256-mTJr50D5hCHTW87iueE2AuDWn8hcAsh2PKlGsGm2Vto=";
+    rev = "5c2eb7dbafa2460803f6f875410b05524e692f8d";
+    hash = "sha256-QzMJVsIwwRwTv3sVhQGdqgxqWSXIy2E3ylmeMqcdRm8=";
   };
 
   nativeBuildInputs = [
